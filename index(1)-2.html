@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Wendy Ble — CD Player</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Arial, sans-serif;
+  }
+  #stage {
+    position: relative;
+    width: min(100vw, 100vh, 900px);
+    height: min(100vw, 100vh, 900px);
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #player {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+  .disc {
+    position: absolute;
+    width: 25%;
+    height: 25%;
+    object-fit: contain;
+    z-index: 2;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    transform: translate(-50%, -50%);
+    will-change: left, top, rotate;
+  }
+  .disc:active { cursor: grabbing; }
+  .disc.inserted {
+    z-index: 3;
+    animation: spin 3.2s linear infinite;
+    cursor: grab;
+  }
+  @keyframes spin {
+    from { rotate: 0deg; }
+    to { rotate: 360deg; }
+  }
+  #hint {
+    position: absolute;
+    left: 50%;
+    bottom: 2%;
+    transform: translateX(-50%);
+    font-size: clamp(9px, 1.7vw, 13px);
+    color: rgba(0,0,0,.48);
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  #stage:hover #hint { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="stage" aria-label="Reproductor de CD interactivo">
+  <img id="player" src="j.png" alt="">
+  <img class="disc" id="cd1" src="gr.png" alt="Disco 1" draggable="false">
+  <img class="disc" id="cd2" src="es.png" alt="Disco 2" draggable="false">
+  <img class="disc" id="cd3" src="gii.png" alt="Disco 3" draggable="false">
+  <img class="disc" id="cd4" src="al.png" alt="Disco 4" draggable="false">
+  <div id="hint">Arrastra un CD al reproductor</div>
+</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const discs = [...document.querySelectorAll('.disc')];
+
+  const audio = new Audio();
+  audio.preload = 'none';
+  audio.volume = 1;
+
+  // Audio de cada CD. Los discos 3 y 4 reproducen sus pistas en orden.
+  const tracks = {
+    cd1: [
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211257/1._GRASS_CAR_-_Wendy_Ble.mp3'
+    ],
+    cd2: [
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211280/4._ESCAPA_-_Wendy_Ble.mp3'
+    ],
+    cd3: [
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211308/menu.wav',
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211306/granja.wav',
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211304/i_just_wanted_a_baguette....wav',
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211299/game_over.wav'
+    ],
+    cd4: [
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211283/9._Give_you_the_world_Lofi_version_-_Wendy_Ble.mp3',
+      'https://res.cloudinary.com/czngsjyq/video/upload/v1795211285/10._Give_you_the_world_Aybizz_Remix_-_Wendy_Ble.mp3'
+    ]
+  };
+
+  // Posiciones iniciales de los cuatro CDs dentro del reproductor.
+  const origins = {
+    cd1: { x: 15, y: 23 },
+    cd2: { x: 85, y: 23 },
+    cd3: { x: 15, y: 79 },
+    cd4: { x: 85, y: 79 }
+  };
+
+  const positions = {};
+  let inserted = null;
+  let activePointer = null;
+  let currentTrackList = [];
+  let trackIndex = 0;
+  let playToken = 0;
+
+  function setPosition(el, x, y) {
+    el.style.left = x + '%';
+    el.style.top = y + '%';
+    positions[el.id] = { x, y };
+  }
+
+  function resetDisc(el) {
+    el.classList.remove('inserted');
+    const p = origins[el.id];
+    setPosition(el, p.x, p.y);
+  }
+
+  function stopAudio() {
+    playToken++;
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    currentTrackList = [];
+    trackIndex = 0;
+    audio.onended = null;
+  }
+
+  function playCurrent() {
+    if (!currentTrackList.length) return;
+
+    const token = playToken;
+    audio.src = currentTrackList[trackIndex];
+    audio.load();
+
+    const promise = audio.play();
+    if (promise && promise.catch) promise.catch(() => {});
+
+    audio.onended = () => {
+      if (token !== playToken || !inserted) return;
+      trackIndex++;
+      if (trackIndex < currentTrackList.length) {
+        playCurrent();
+      }
+    };
+  }
+
+  function insertDisc(el) {
+    if (inserted && inserted !== el) {
+      inserted.classList.remove('inserted');
+      resetDisc(inserted);
+    }
+
+    stopAudio();
+    inserted = el;
+    setPosition(el, 50, 50);
+    el.classList.add('inserted');
+
+    currentTrackList = tracks[el.id] || [];
+    trackIndex = 0;
+    playCurrent();
+  }
+
+  function ejectDisc(el) {
+    if (inserted === el) {
+      stopAudio();
+      inserted = null;
+    }
+    resetDisc(el);
+  }
+
+  discs.forEach(el => {
+    const p = origins[el.id];
+    setPosition(el, p.x, p.y);
+
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      activePointer = e.pointerId;
+
+      el.dataset.startX = positions[el.id].x;
+      el.dataset.startY = positions[el.id].y;
+      el.dataset.dragX = e.clientX;
+      el.dataset.dragY = e.clientY;
+      el.dataset.wasInserted = inserted === el ? 'yes' : 'no';
+
+      el.classList.remove('inserted');
+      el.style.zIndex = '10';
+    });
+
+    el.addEventListener('pointermove', e => {
+      if (activePointer !== e.pointerId) return;
+
+      const rect = stage.getBoundingClientRect();
+      const dx = (e.clientX - Number(el.dataset.dragX)) / rect.width * 100;
+      const dy = (e.clientY - Number(el.dataset.dragY)) / rect.height * 100;
+
+      const x = Math.max(-8, Math.min(108, Number(el.dataset.startX) + dx));
+      const y = Math.max(-8, Math.min(108, Number(el.dataset.startY) + dy));
+      setPosition(el, x, y);
+    });
+
+    const finish = e => {
+      if (activePointer !== e.pointerId) return;
+
+      activePointer = null;
+      el.style.zIndex = '';
+
+      const p = positions[el.id];
+      const distance = Math.hypot(p.x - 50, p.y - 50);
+
+      if (distance < 18) {
+        insertDisc(el);
+      } else if (el.dataset.wasInserted === 'yes') {
+        ejectDisc(el);
+      } else {
+        resetDisc(el);
+      }
+    };
+
+    el.addEventListener('pointerup', finish);
+    el.addEventListener('pointercancel', finish);
+  });
+})();
+</script>
+</body>
+</html>
